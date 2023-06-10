@@ -26,7 +26,14 @@ func (favoriteRepository *favoriteRepository) Add(ctx context.Context, entity mo
 		Item:      putItem,
 	}
 
+	println("putItem", putItem)
+	println("input", input)
+
 	_, err = favoriteRepository.db.PutItemWithContext(ctx, input)
+	if err != nil {
+		println("err", err)
+	}
+
 	return err
 
 }
@@ -111,31 +118,28 @@ func (favoriteRepository *favoriteRepository) GetItems(ctx context.Context, user
 
 // GetPaginated implements repository.IFavoriteRepository
 func (favoriteRepository *favoriteRepository) GetPaginated(ctx context.Context, userId string, nextToken string, limit int) ([]model.Favorite, string, error) {
-	response, err := favoriteRepository.db.Query(&dynamodb.QueryInput{
-		TableName: aws.String("favorites"),
-		KeyConditions: map[string]*dynamodb.Condition{
-			"pk": {
-				ComparisonOperator: aws.String("EQ"),
-				AttributeValueList: []*dynamodb.AttributeValue{
-					{
-						S: aws.String(userId),
-					},
-				},
-			},
-		},
-		Limit:            aws.Int64(int64(limit)),
-		ScanIndexForward: aws.Bool(false),
-		ExclusiveStartKey: map[string]*dynamodb.AttributeValue{
-			"pk": {
+
+	queryInput := &dynamodb.QueryInput{
+		TableName:              aws.String("favorites"),
+		KeyConditionExpression: aws.String("pk = :pk"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":pk": {
 				S: aws.String(userId),
 			},
+		},
+		Limit: aws.Int64(int64(limit)),
+	}
+	if nextToken != "" {
+		queryInput.ExclusiveStartKey = map[string]*dynamodb.AttributeValue{
 			"sk": {
 				S: aws.String(nextToken),
 			},
-		},
-	})
+		}
+	}
+	response, err := favoriteRepository.db.QueryWithContext(ctx, queryInput)
 
 	if err != nil {
+		println("err", err)
 		return nil, "", err
 	}
 
