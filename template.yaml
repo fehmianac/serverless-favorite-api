@@ -1,0 +1,320 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless Favorite API
+
+Parameters:
+  TableName:
+    Type: String
+    Default: 'favorites'
+    Description: (Required) The name of the new DynamoDB to store connection identifiers for each connected clients. Minimum 3 characters
+    MinLength: 3
+    MaxLength: 50
+    AllowedPattern: ^[A-Za-z_]+$
+    ConstraintDescription: 'Required. Can be characters and underscore only. No numbers or special characters allowed.'
+  CodeBucketName:
+    Type: String
+    Default: 'aws-websockets-adaptor'
+    Description: (Required) The name of the S3 bucket where the Lambda function code is stored. Minimum 3 characters
+    MinLength: 3
+    MaxLength: 50
+
+Resources:
+  FavoritesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "pk"
+          AttributeType: "S"
+        - AttributeName: "sk"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "pk"
+          KeyType: "HASH"
+        - AttributeName: "sk"
+          KeyType: "RANGE"
+      BillingMode:
+        PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: True
+      TableName: !Ref TableName
+
+  ServerlessFavoriteApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: serverless-favorite-api
+      ProtocolType: HTTP
+
+  AddToFavoriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AddToFavoriteFunction
+      CodeUri:
+        Bucket: !Ref CodeBucketName
+        Key: deploy.zip
+      Handler: main
+      Role: !GetAtt AddToFavoriteFunctionExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      Runtime: go1.x
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TableName
+
+  AddToFavoriteFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - ServerlessFavoriteApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AddToFavoriteFunction
+      Principal: apigateway.amazonaws.com
+
+  AddToFavoriteFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: allowLambdaLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+        - PolicyName: AddToFavoriteFunctionDynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt FavoritesTable.Arn
+
+  AddToFavoriteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+      RouteKey: 'POST /user/{userId}/favorite'
+      AuthorizationType: NONE
+      OperationName: AddToFavoriteRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref AddToFavoriteRouteInteg
+
+  AddToFavoriteRouteInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+      PayloadFormatVersion: '2.0'
+      Description: DeleteFavoriteRouteInteg Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddToFavoriteFunction.Arn}/invocations
+   
+  GetFavoriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetFavoriteFunction
+      CodeUri:
+        Bucket: !Ref CodeBucketName
+        Key: deploy.zip
+      Handler: main
+      Role: !GetAtt GetFavoriteFunctionExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      Runtime: go1.x
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TableName
+
+  GetFavoriteFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - ServerlessFavoriteApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetFavoriteFunction
+      Principal: apigateway.amazonaws.com
+
+  GetFavoriteFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: allowLambdaLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+        - PolicyName: GetFavoriteFunctionDynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt FavoritesTable.Arn
+
+  GetFavoriteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+      RouteKey: 'GET /user/{userId}/favorite'
+      AuthorizationType: NONE
+      OperationName: GetFavoriteRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref GetFavoriteRouteInteg
+
+  GetFavoriteRouteInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+      PayloadFormatVersion: '2.0'
+      Description: DeleteFavoriteRouteInteg Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetFavoriteFunction.Arn}/invocations
+
+  DeleteFavoriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DeleteFavoriteFunction
+      CodeUri:
+        Bucket: !Ref CodeBucketName
+        Key: deploy.zip
+      Handler: main
+      Role: !GetAtt DeleteFavoriteFunctionExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 180
+      Runtime: go1.x
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TableName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TableName
+
+  DeleteFavoriteFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - ServerlessFavoriteApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DeleteFavoriteFunction
+      Principal: apigateway.amazonaws.com
+
+  DeleteFavoriteFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: allowLambdaLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+        - PolicyName: DeleteFavoriteFunctionDynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt FavoritesTable.Arn
+
+  DeleteFavoriteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+      RouteKey: 'DELETE /user/{userId}/favorite/{itemId}'
+      AuthorizationType: NONE
+      OperationName: DeleteFavoriteRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DeleteFavoriteRouteInteg
+
+  DeleteFavoriteRouteInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+      PayloadFormatVersion: '2.0'
+      Description: DeleteFavoriteRouteInteg Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteFavoriteFunction.Arn}/invocations
+
+  ServerlessFavoriteApiDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - AddToFavoriteRoute
+      - GetFavoriteRoute
+      - DeleteFavoriteRoute
+    Properties:
+      ApiId: !Ref ServerlessFavoriteApi
+
+  ServerlessFavoriteApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: Prod
+      Description: Prod Stage
+      DeploymentId: !Ref ServerlessFavoriteApiDeployment
+      ApiId: !Ref ServerlessFavoriteApi
+
+Outputs:
+  ConnectionsTableArn:
+    Description: "FavoritesTable table ARN"
+    Value: !GetAtt FavoritesTable.Arn
